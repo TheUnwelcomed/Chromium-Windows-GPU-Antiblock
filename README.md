@@ -12,8 +12,10 @@ The Admin-Gate's emulator cores and the new Windows engine need WebGL 2 on the c
 
 1. **Code → Download ZIP**, unzip anywhere (or `git clone`). Windows marks files from a downloaded ZIP: right-click
    the ZIP → Properties → **Unblock** before unzipping, or answer **Run** when Windows asks about a `.cmd` file.
-2. Double-click **`update.cmd`**. It downloads Chrome for Testing stable (about 215 MB), checks the file against
-   Google's own record of it (size and MD5), and unpacks it into `builds\`.
+2. Double-click **`update.cmd`**. It first brings these files themselves up to date from this repository (all but
+   your `flags.txt`, `update.cmd` and `update-and-run.cmd`), then downloads Chrome for Testing stable (about 215 MB),
+   checks the file against Google's own record of it (size and MD5), and unpacks it into `builds\`. Run it again
+   whenever a fix is announced here: nothing needs downloading by hand again.
 3. Double-click **`run.cmd`**. It starts the browser with the switches in [`flags.txt`](flags.txt), using a profile of
    its own in `profile\`. Any installed Chrome and its profile are left alone.
 4. Double-click **`check.cmd`**. It starts the browser once more in a fresh profile and asks it, through its own
@@ -23,7 +25,7 @@ The Admin-Gate's emulator cores and the new Windows engine need WebGL 2 on the c
 
 | Command | What it does |
 |---|---|
-| `update.cmd [stable\|beta\|dev\|canary\|153\|153.0.8010.52]` | fetch Chrome for Testing: a channel, the newest of a milestone, or one exact version. The newest build with the codecs is `canary` |
+| `update.cmd [stable\|beta\|dev\|canary\|153\|153.0.8010.52]` | these files' newest from GitHub, then Chrome for Testing: a channel, the newest of a milestone, or one exact version. The newest build with the codecs is `canary` |
 | `run.cmd [URL] [--switch]` | start it with `flags.txt`; anything after goes to the browser |
 | `check.cmd [keep] [--switch]` | the check; `keep` leaves the window open, a `--switch` is tried once without touching `flags.txt` |
 | `run.cmd edge`, `check.cmd edge` | the same with the Microsoft Edge already on the machine (own profile `profile-edge\`): the one Chromium browser on Windows that plays Dolby AC-3/E-AC-3 |
@@ -129,6 +131,7 @@ browser, so Jellyfin transcodes it. Dolby Vision stays as Chromium ships it: une
 | `H.264` / `AAC` | not Chrome for Testing: run `update.cmd` |
 | `HEVC` | hardware video decoding is off, or the card has no HEVC decoder |
 | `shader work ... the processor drawing` | WebGL works, but on the processor |
+| `the window of the last check (check keep) is still open ... BrowserMetrics-....pma' is denied` | from a copy before 2026-11-26: the browser of an earlier check still runs on its folder (see the next line). The current `check.cmd` closes it itself |
 | `Chromium  did not open its debugging port ... (exited: True)` | from a copy before 2026-11-26 run as administrator: since 2025 Chrome and Edge, started as administrator, start themselves again as the signed-in user and the first process ends at once (`chrome_main_delegate.cc`, `MaybeAutoDeElevate`). The current `check.cmd` waits for the browser that took over. Administrator is not needed for any of these files |
 | `clock, cost of a reading` | the browser's clock is slow to read; the Dreamcast core reads it about 150,000 times a second. Usually Windows told to use the HPET timer: `bcdedit /enum {current}` in an administrator command prompt; a line `useplatformclock Yes` is it, and `bcdedit /deletevalue useplatformclock` and a restart undo it |
 | `clock, finest step` | the browser found no steady processor clock and times everything by Windows' millisecond timer |

@@ -1,7 +1,7 @@
 # antiblock.ps1 - Chromium for Windows that draws on the graphics card, not on the processor.
 # Windows PowerShell 5.1 (Windows 10's own) or PowerShell 7. Nothing to install. The .cmd files beside it run it.
 #
-#   update [stable|beta|dev|canary|153|153.0.8010.52]   fetch Chrome for Testing (default: stable)
+#   update [stable|beta|dev|canary|153|153.0.8010.52]   these files' newest from GitHub, then Chrome for Testing (stable)
 #   use NAME                                             use a build in builds\ made here (build\build-chromium.cmd)
 #   run [edge] [URL ...] [--switch ...]                  start it (or Microsoft Edge), with the switches of flags.txt
 #   check [edge] [keep] [--switch ...]                   ask it what it does with the card and the codecs -> reports\
@@ -34,6 +34,7 @@ $CheckDir = Join-Path $Root 'check'
 $GpuPrefKey = 'Software\Microsoft\DirectX\UserGpuPreferences'   # under HKEY_CURRENT_USER: Settings > Display > Graphics
 $KeepBuilds = 2                                                  # the current one and one before it
 $CftJson = 'https://googlechromelabs.github.io/chrome-for-testing/'
+$ToolsZip = 'https://github.com/TheUnwelcomed/Chromium-Windows-GPU-Antiblock/archive/refs/heads/main.zip'   # these files
 $script:Lines = New-Object System.Collections.Generic.List[string]
 
 # ------------------------------------------------------------------------------------------------ small helpers
@@ -310,7 +311,39 @@ function Remove-OldBuilds {
   }
 }
 
+function Update-Tools {
+  # These files themselves, the newest from GitHub, so that a fix to the check arrives with update.cmd. Left as they
+  # are: flags.txt (your switches), update.cmd and update-and-run.cmd (one of them is running, and cmd.exe reads a
+  # batch file as it goes), and all that is made here (builds\, the profiles, reports\ - none of them is in the download).
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) ('antiblock-' + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+  try {
+    $zip = Join-Path $tmp 'tools.zip'
+    Invoke-WebRequest -Uri $ToolsZip -OutFile $zip -UseBasicParsing -TimeoutSec 120
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $x = Join-Path $tmp 'x'
+    [IO.Compression.ZipFile]::ExtractToDirectory($zip, $x)
+    $top = @(Get-ChildItem -LiteralPath $x -Directory)
+    if ($top.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $top[0].FullName 'antiblock.ps1'))) { throw 'the download is not these tools' }
+    $base = $top[0].FullName.TrimEnd('\') + '\'
+    $changed = @()
+    # GetFiles gives each path as $base plus the rest, whatever Windows' own spelling of the temporary folder
+    foreach ($f in @([IO.Directory]::GetFiles($base, '*', [IO.SearchOption]::AllDirectories))) {
+      $rel = $f.Substring($base.Length)
+      if ($rel -eq 'flags.txt' -or $rel -eq 'update.cmd' -or $rel -eq 'update-and-run.cmd') { continue }
+      $dest = Join-Path $Root $rel
+      if ((Test-Path -LiteralPath $dest) -and (Get-FileHash -LiteralPath $dest).Hash -eq (Get-FileHash -LiteralPath $f).Hash) { continue }
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+      Copy-Item -LiteralPath $f -Destination $dest -Force
+      $changed += $rel
+    }
+    if ($changed.Count) { Write-Host ('tools: {0} file(s) brought up to date from GitHub: {1}' -f $changed.Count, ($changed -join ', ')) }
+    else { Write-Host 'tools: already the newest' }
+  } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 function Invoke-Update([string]$Want) {
+  try { Update-Tools } catch { Write-Host "tools: not brought up to date ($($_.Exception.Message)); the browser still is" }
   New-Item -ItemType Directory -Force -Path $Builds | Out-Null
   $b = Resolve-Build $Want
   Write-Host "newest: $($b.Label)"
