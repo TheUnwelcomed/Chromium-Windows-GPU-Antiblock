@@ -1,0 +1,26 @@
+# The GN arguments build-chromium.cmd builds with (it copies this file to src\out\Codecs\args.gn). Edit it before a
+# build to change what is built. Every name here was read in Chromium 158's own build files; the comments say where.
+
+target_os = "win"
+target_cpu = "x64"
+
+# A release build without debug symbols (symbols would triple the disk space and the link time).
+is_debug = false
+is_component_build = false
+is_official_build = false          # "build-chromium.cmd official" sets true: PGO + ThinLTO, a faster browser
+dcheck_always_on = false           # on by default in non-official builds (build/config/dcheck_always_on.gni)
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+
+# The codecs (build/config/features.gni, third_party/ffmpeg/ffmpeg_options.gni, media/media_options.gni)
+proprietary_codecs = true                 # H.264, AAC, MP3; native HLS; MPEG-TS in MSE
+ffmpeg_branding = "Chrome"                # FFmpeg's H.264, AAC and MP3 decoders
+enable_platform_hevc = true               # HEVC and HEVC 10-bit, decoded by the graphics card
+enable_hevc_parser_and_hw_decoder = true
+enable_platform_ac3_eac3_audio = true     # AC-3 / E-AC-3 through Windows' own Dolby decoder
+                                          # (media/filters/win/media_foundation_audio_decoder.cc)
+
+# DTS: on Windows it links Microsoft's VCRTForwarders packages (media/filters/BUILD.gn), which a public checkout
+# may not have, and Windows 10 has no DTS decoder of its own. Off.
+# enable_platform_dts_audio = true

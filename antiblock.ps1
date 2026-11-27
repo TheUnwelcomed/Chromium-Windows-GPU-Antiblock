@@ -2,6 +2,7 @@
 # Windows PowerShell 5.1 (Windows 10's own) or PowerShell 7. Nothing to install. The .cmd files beside it run it.
 #
 #   update [stable|beta|dev|canary|153|153.0.8010.52]   fetch Chrome for Testing (default: stable)
+#   use NAME                                             use a build in builds\ made here (build\build-chromium.cmd)
 #   run [edge] [URL ...] [--switch ...]                  start it (or Microsoft Edge), with the switches of flags.txt
 #   check [edge] [keep] [--switch ...]                   ask it what it does with the card and the codecs -> reports\
 #   reset [edge]                                         empty the GPU caches of its profile
@@ -293,6 +294,19 @@ function Invoke-Update([string]$Want) {
   Write-Host ('in use: {0} ({1})' -f $exe, (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion)
 }
 
+function Invoke-Use([string]$Name) {
+  # Make a build in builds\ the one run.cmd and check.cmd use - for builds made here (build\build-chromium.cmd
+  # makes builds\custom-VERSION) or put there by hand. update.cmd never removes such a build.
+  if (-not $Name) { throw 'use NAME: the name of a folder in builds\ (build-chromium.cmd makes custom-VERSION)' }
+  $dir = Join-Path $Builds $Name
+  $exe = Find-Chrome $dir
+  if (-not $exe) { throw "no chrome.exe in $dir" }
+  $v = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
+  Set-Current ([pscustomobject]@{ Name = $Name; Label = "Chromium $v ($Name, built on this machine)" })
+  Set-GpuPreference $exe
+  Write-Host "in use: $exe ($v)"
+}
+
 # ------------------------------------------------------------------------------------------------ which browser
 
 function Find-Edge {
@@ -566,8 +580,9 @@ try {
     'reset' { Invoke-Reset $rest }
     'status' { Invoke-Status }
     'forget' { Invoke-Forget }
+    'use' { Invoke-Use ($rest | Select-Object -First 1) }
     default {
-      Write-Host 'antiblock.ps1 update [stable|beta|dev|canary|MILESTONE|VERSION] | run [edge] [URL] [--switch] | check [edge] [keep] [--switch] | reset [edge] | status | forget'
+      Write-Host 'antiblock.ps1 update [stable|beta|dev|canary|MILESTONE|VERSION] | use NAME | run [edge] [URL] [--switch] | check [edge] [keep] [--switch] | reset [edge] | status | forget'
       Write-Host 'The .cmd files beside it do the same with a double-click. README.md says what each part does.'
     }
   }

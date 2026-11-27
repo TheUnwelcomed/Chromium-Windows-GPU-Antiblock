@@ -30,6 +30,7 @@ The Admin-Gate's emulator cores and the new Windows engine need WebGL 2 on the c
 | `reset-gpu-cache.cmd [edge]` | empty the shader and GPU caches of the profile (bookmarks and logins stay) |
 | `status.cmd` | the build in use, the switches, what Windows says about the session and each display adapter |
 | `update-and-run.cmd` | both |
+| `build\build-chromium.cmd` | **build your own Chromium with every codec Windows can decode**, AC-3/E-AC-3 included, on this PC: [build/README.md](build/README.md) |
 
 All of it is `antiblock.ps1` (Windows PowerShell 5.1, which Windows 10 has; nothing to install). The `.cmd` files only
 run it with `-ExecutionPolicy Bypass`, so double-clicking works.
@@ -83,14 +84,14 @@ Never add `--disable-webgl`, `--disable-webgl2`, `--disable-3d-apis`, `--disable
 From `build/config/features.gni` and `media/media_options.gni` at 160.0.8187.0, and from the check run on Chrome for
 Testing 153:
 
-| | Chrome for Testing (this tool) | Microsoft Edge (`run.cmd edge`) | raw Chromium snapshot |
-|---|---|---|---|
-| H.264, AAC | yes | yes | **no** |
-| HEVC / HEVC 10-bit | yes, decoded on the card (the 2060 SUPER has HEVC decode) | `check.cmd edge` says | **no** |
-| AC-3 / E-AC-3 (Dolby) | no: compiled out of Chrome on Windows | yes, through Windows 10's own Dolby decoder | no |
-| DTS | no: compiled out | `check.cmd edge` says | no |
-| VP9, AV1, Opus, FLAC, MP3 | yes (AV1 on the processor: the 2060 has no AV1 decoder) | `check.cmd edge` says | yes |
-| MPEG-TS in MSE, HLS without a script | yes | `check.cmd edge` says | no |
+| | Chrome for Testing (`update.cmd`) | your own build (`build\build-chromium.cmd`) | Microsoft Edge (`run.cmd edge`) | raw Chromium snapshot |
+|---|---|---|---|---|
+| H.264, AAC | yes | yes | yes | **no** |
+| HEVC / HEVC 10-bit | yes, decoded on the card (the 2060 SUPER has HEVC decode) | yes, on the card | `check.cmd edge` says | **no** |
+| AC-3 / E-AC-3 (Dolby) | no: compiled out of Chrome on Windows | **yes**, through Windows 10's own Dolby decoder | yes, the same decoder | no |
+| DTS | no: compiled out | no (see build/README.md) | `check.cmd edge` says | no |
+| VP9, AV1, Opus, FLAC, MP3 | yes (AV1 on the processor: the 2060 has no AV1 decoder) | yes | `check.cmd edge` says | yes |
+| MPEG-TS in MSE, HLS without a script | yes | yes | `check.cmd edge` says | no |
 
 Raw snapshots are therefore not offered (`update.cmd snapshot` refuses and explains why). Where a browser can't play
 an audio codec, Jellyfin turns it into AAC for that browser, which costs little. MPEG-2 video plays in no Chromium
@@ -137,8 +138,12 @@ use there as well.
 | `check/gpu-check.html` | the page the check opens. It also works on its own: open it in any browser. WebGL 2 and who draws it, a timed shader, WebGPU, every codec above, hardware decoding, refresh rate |
 | `check/gpu-judge.js` | runs inside chrome://gpu and turns Chromium's own GPU record into ok/FAIL lines. Shared by the Windows and the Linux check |
 | `check/cdp_check.py` | the check in Python (used by `linux/check.sh`; also runs on Windows where Python is installed) |
+| `build/` | building Chromium with every codec on this PC: `build-chromium.cmd`, `build-chromium.ps1`, `args.gn`, and how-to ([build/README.md](build/README.md)) |
 | `linux/` | the Linux scripts |
 | `tests/` | `node tests/test_judge.mjs` runs the judge against made-up chrome://gpu data for the Windows cases, including the photo's exact state. `python3 -I tests/test_linux.py` covers the Linux downloader without a network |
+
+**Not run here either:** `build/build-chromium.ps1` (no Windows; syntax checked, every argument, path and
+requirement read in Chromium 158.0.8127.88's source).
 
 **Tested here** (a Linux machine without a graphics card): the check end to end against Chrome for Testing 153. It
 correctly calls the software renderer a FAIL, H.264/AAC ok, HEVC FAIL with no card to decode it, and names the
