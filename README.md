@@ -35,6 +35,21 @@ The Admin-Gate's emulator cores and the new Windows engine need WebGL 2 on the c
 All of it is `antiblock.ps1` (Windows PowerShell 5.1, which Windows 10 has; nothing to install). The `.cmd` files only
 run it with `-ExecutionPolicy Bypass`, so double-clicking works.
 
+## Which browser for the Admin-Gate
+
+**Chrome**, meaning the Chrome for Testing `run.cmd` starts. The gate was built and proven in Chrome
+(Unwelcomed-IPTV `docs/ADMIN-GATE.md` 8zd), and Chrome gives the sealed frame everything its programs need: WebGL 2
+on the card (the Dreamcast and PSP cores, the new Windows engine), WebAssembly with SIMD, tail calls and standard
+exceptions, JSPI (GnollHack), 2 GB of memory at once, and threads where the site sends its isolation headers.
+**Edge** (`run.cmd edge`) is the same engine. **Firefox** on the owner's Windows machine has no WebGL, so the
+Dreamcast and PSP cores cannot draw there.
+
+`check.cmd` builds a frame exactly as the gate does (`sandbox="allow-scripts"`, origin `null`, the same `allow`
+words) and asks it what the gate's own browser check asks, using the same WebAssembly module bytes. Its `gate frame:`
+lines must all say `ok`. On the admin site itself, Ctrl+Alt+B in the Emulator's list is the gate's own check. Its
+*graphics path* line should read `WebGL 2, by ANGLE (NVIDIA, NVIDIA GeForce RTX 2060 SUPER ...)`, without "drawn by
+the processor".
+
 ## What was found (2026-11-26)
 
 Everything below was read in Chromium's own source at the build the owner runs (160.0.8187.0, cloned the same day).
@@ -140,7 +155,7 @@ use there as well.
 | `antiblock.ps1` | everything on Windows: update, run, check, reset, status, forget |
 | `*.cmd` | double-click wrappers |
 | `flags.txt` | the switches, with the reason for each |
-| `check/gpu-check.html` | the page the check opens. It also works on its own: open it in any browser. WebGL 2 and who draws it, a timed shader, WebGPU, every codec above, hardware decoding, refresh rate |
+| `check/gpu-check.html` | the page the check opens. It also works on its own: open it in any browser. WebGL 2 and who draws it, the Admin-Gate's sealed frame and what its programs need, a timed shader, WebGPU, every codec above, hardware decoding, refresh rate |
 | `check/gpu-judge.js` | runs inside chrome://gpu and turns Chromium's own GPU record into ok/FAIL lines. Shared by the Windows and the Linux check |
 | `check/cdp_check.py` | the check in Python (used by `linux/check.sh`; also runs on Windows where Python is installed) |
 | `build/` | building Chromium with every codec on this PC: `build-chromium.cmd`, `build-chromium.ps1`, `args.gn`, and how-to ([build/README.md](build/README.md)) |

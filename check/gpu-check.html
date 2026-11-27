@@ -142,6 +142,51 @@
       }
     }
 
+    // The Admin-Gate's sealed frame, made the way the gate makes it (program/unwelcomed_iptv/gatejs/shell.js:
+    // sandbox="allow-scripts", so an origin of its own, "null"; allow="gamepad *; autoplay *") and asked what the gate's
+    // own browser check asks there (gatepages/emulator.js, Ctrl+Alt+B): WebGL 2 and who draws it, WebAssembly with
+    // SIMD, tail calls, standard exceptions and JSPI (the same module bytes), 2 GB at once. Shared memory for threads
+    // needs the site's isolation headers, which a file opened from disk cannot have: the gate's own check shows it.
+    var GATE_FRAME = '<!DOCTYPE html><meta charset="utf-8"><body><script>(function () {' +
+      'var r = { origin: String(self.origin) }, b = function (a) { return new Uint8Array(a); };' +
+      'try { var c = document.createElement("canvas"), g = c.getContext("webgl2", { powerPreference: "high-performance" });' +
+      ' if (g) { var e = g.getExtension("WEBGL_debug_renderer_info"); r.webgl2 = String(e ? g.getParameter(e.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)); } else r.webgl2 = ""; }' +
+      ' catch (x) { r.webgl2 = ""; r.webglError = String(x); }' +
+      'try { r.simd = WebAssembly.validate(b([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,22,1,20,0,253,12,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11]));' +
+      ' r.tail = WebAssembly.validate(b([0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,10,6,1,4,0,18,0,11]));' +
+      ' r.exn = WebAssembly.validate(b([0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,10,10,1,8,0,31,64,1,2,0,11,11]));' +
+      ' r.jspi = typeof WebAssembly.Suspending === "function"; } catch (x) { r.wasmError = String(x); }' +
+      'try { r.twoGB = new WebAssembly.Memory({ initial: 32767 }).buffer.byteLength === 32767 * 65536; } catch (x) { r.twoGB = false; }' +
+      'r.shared = !!window.crossOriginIsolated; r.pads = typeof navigator.getGamepads === "function";' +
+      'parent.postMessage({ gateCheck: r }, "*"); })();<\/script></body>';
+    var gate = await new Promise(function (resolve) {
+      var f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-scripts');
+      f.setAttribute('allow', 'gamepad *; autoplay *');
+      f.style.cssText = 'width:1px;height:1px;border:0;position:absolute;left:-10px;top:-10px';
+      var done = function (v) { window.removeEventListener('message', on); f.remove(); resolve(v); };
+      var on = function (e) { if (e.source === f.contentWindow && e.data && e.data.gateCheck) done(e.data.gateCheck); };
+      window.addEventListener('message', on);
+      setTimeout(function () { done(null); }, 15000);
+      f.srcdoc = GATE_FRAME;
+      document.body.appendChild(f);
+    });
+    if (!gate) {
+      say('FAIL', 'gate frame', 'the sealed frame did not answer in 15 s');
+    } else {
+      say(gate.origin === 'null' ? 'ok' : 'FAIL', 'gate frame: sealed', 'origin ' + gate.origin + (gate.origin === 'null' ? ' (as in the gate)' : ' - NOT sealed'));
+      var gs = SOFTWARE.test(gate.webgl2);
+      say(gate.webgl2 && !gs ? 'ok' : 'FAIL', 'gate frame: WebGL 2', !gate.webgl2 ? 'NONE in the sealed frame - the Dreamcast and PSP cores and the new Windows engine cannot draw' :
+        gate.webgl2 + (gs ? '  <- drawn by the processor, not the card' : ''));
+      say(gate.simd && gate.tail && gate.exn ? 'ok' : 'FAIL', 'gate frame: WebAssembly', 'SIMD ' + (gate.simd ? 'yes' : 'NO') + ', tail calls ' + (gate.tail ? 'yes' : 'NO') +
+        ', standard exceptions ' + (gate.exn ? 'yes' : 'NO') + ' (the new Windows engine needs both)');
+      say(gate.jspi ? 'ok' : 'FAIL', 'gate frame: JSPI', gate.jspi ? 'yes (GnollHack waits inside a call)' : 'NO - GnollHack cannot run');
+      say(gate.twoGB ? 'ok' : 'FAIL', 'gate frame: memory', gate.twoGB ? '2 GB at once' : 'NOT 2 GB at once - a large game may end for it');
+      say('--', 'gate frame: threads', 'shared memory needs the site\'s isolation headers; on the admin site, Ctrl+Alt+B in the Emulator shows it' +
+        (gate.shared ? ' (here: yes)' : ''));
+      say('--', 'gate frame: controllers', gate.pads ? 'the API is there' : 'no gamepad API');
+    }
+
     // WebGPU (the gate does not need it; a working adapter is a good sign)
     if (!navigator.gpu) {
       say('--', 'WebGPU', 'not in this browser');
