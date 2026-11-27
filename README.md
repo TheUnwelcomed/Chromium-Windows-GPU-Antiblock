@@ -129,6 +129,9 @@ browser, so Jellyfin transcodes it. Dolby Vision stays as Chromium ships it: une
 | `H.264` / `AAC` | not Chrome for Testing: run `update.cmd` |
 | `HEVC` | hardware video decoding is off, or the card has no HEVC decoder |
 | `shader work ... the processor drawing` | WebGL works, but on the processor |
+| `Chromium  did not open its debugging port ... (exited: True)` | from a copy before 2026-11-26 run as administrator: since 2025 Chrome and Edge, started as administrator, start themselves again as the signed-in user and the first process ends at once (`chrome_main_delegate.cc`, `MaybeAutoDeElevate`). The current `check.cmd` waits for the browser that took over. Administrator is not needed for any of these files |
+| `clock, cost of a reading` | the browser's clock is slow to read; the Dreamcast core reads it about 150,000 times a second. Usually Windows told to use the HPET timer: `bcdedit /enum {current}` in an administrator command prompt; a line `useplatformclock Yes` is it, and `bcdedit /deletevalue useplatformclock` and a restart undo it |
+| `clock, finest step` | the browser found no steady processor clock and times everything by Windows' millisecond timer |
 
 ## Linux (`linux/`, RHEL 9)
 

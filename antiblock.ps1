@@ -182,15 +182,65 @@ function Get-OwnChromes {
       $p -and $p.StartsWith($Builds, [StringComparison]::OrdinalIgnoreCase) })
 }
 
+function Get-ProfileProcesses([string]$Dir) {
+  # Every chrome.exe / msedge.exe started on this profile folder. Started as administrator, Chrome and Edge start
+  # themselves again as the signed-in user (through Explorer) and the first process ends at once - Chromium's
+  # chrome_main_delegate.cc, MaybeAutoDeElevate, since 2025 - so the browser to wait on is then not the one started here.
+  $want = '--user-data-dir="?' + [regex]::Escape($Dir) + '\\?"?(\s|$)'
+  @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe' OR Name='msedge.exe'" -ErrorAction SilentlyContinue | Where-Object {
+      $_.CommandLine -and $_.CommandLine -match $want })
+}
+
+function Stop-ProfileBrowser([string]$Dir, [int]$Seconds) {
+  # waits up to Seconds for every process on the profile to end, then ends what is left
+  $clock = [Diagnostics.Stopwatch]::StartNew()
+  while ($clock.Elapsed.TotalSeconds -lt $Seconds -and @(Get-ProfileProcesses $Dir).Count) { Start-Sleep -Milliseconds 500 }
+  foreach ($p in @(Get-ProfileProcesses $Dir)) { try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { } }
+}
+
+function Test-Elevated {
+  try { return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+  catch { return $false }
+}
+
+function Read-SharedText([string]$Path) {
+  # a file a browser may still hold open for writing (its log)
+  try {
+    $fs = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try { return (New-Object IO.StreamReader($fs)).ReadToEnd() } finally { $fs.Dispose() }
+  } catch { return '' }
+}
+
 function Show-Windows {
-  # What Windows itself says of the session and the adapters, before Chromium is asked anything
+  # What Windows itself says of the session, the processor and the adapters, before Chromium is asked anything
   if ($env:SESSIONNAME -and $env:SESSIONNAME -like 'RDP-*') {
     Write-Line 'FAIL' 'session' "Remote Desktop ($env:SESSIONNAME): programs in it get no graphics card - run this at the machine itself"
-  } else { Write-Line '--' 'session' ($(if ($env:SESSIONNAME) { $env:SESSIONNAME } else { 'local' })) }
+  } else {
+    $where = $(if ($env:SESSIONNAME) { $env:SESSIONNAME } else { 'local' })
+    if (Test-Elevated) { $where += ', run as administrator (not needed: the browser starts itself again as you, and the check waits for that one)' }
+    Write-Line '--' 'session' $where
+  }
+  try {
+    foreach ($cpu in @(Get-CimInstance Win32_Processor -ErrorAction Stop)) {
+      Write-Line '--' 'processor' ('{0}, {1} cores / {2} threads, {3:0.0} GHz base' -f ([string]$cpu.Name).Trim(), $cpu.NumberOfCores,
+        $cpu.NumberOfLogicalProcessors, ($cpu.MaxClockSpeed / 1000.0))
+    }
+  } catch { }
   try {
     $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
     if ("$($cs.Model) $($cs.Manufacturer)" -match 'Virtual|VMware|VirtualBox|KVM|QEMU|Xen|Parallels|Hyper-V') {
       Write-Line '--' 'machine' "a virtual machine ($($cs.Manufacturer) $($cs.Model)): its own display adapter is blocklisted by Chromium"
+    } elseif ($cs.HypervisorPresent) {
+      # Windows itself running on Hyper-V (Memory integrity, WSL 2, Windows Sandbox, Docker): every program pays a little
+      # for it, and an emulator - one core, much memory touched at random - more than most
+      $what = 'Hyper-V is on (WSL 2, Windows Sandbox, Docker or Core isolation turned it on)'
+      try {
+        $dg = Get-CimInstance -Namespace 'root\Microsoft\Windows\DeviceGuard' -ClassName Win32_DeviceGuard -ErrorAction Stop
+        if ($dg.VirtualizationBasedSecurityStatus -eq 2) {
+          $what = 'Hyper-V is on, with virtualization-based security' + $(if (@($dg.SecurityServicesRunning) -contains 2) { ' and Memory integrity (Core isolation)' } else { '' })
+        }
+      } catch { }
+      Write-Line '--' 'hypervisor' ($what + ': Windows itself runs on it, which costs one-core programs such as emulators some speed')
     }
     foreach ($vc in @(Get-CimInstance Win32_VideoController -ErrorAction Stop)) {
       $drv = [string]$vc.DriverVersion
@@ -435,8 +485,13 @@ function Invoke-Check([string[]]$Rest) {
   $KeepOpen = @($cur.rest | Where-Object { $_ -eq 'keep' }).Count -gt 0
   $Extra = @($cur.rest | Where-Object { $_ -ne 'keep' })
   if (Test-Path -LiteralPath $CheckProfile) {
-    try { Remove-Item -LiteralPath $CheckProfile -Recurse -Force }
-    catch { throw "the window of the last check (check keep) is still open: close it first ($($_.Exception.Message))" }
+    # the window of a check left open (check keep, or one that lost its browser) holds the folder: close it
+    if (@(Get-ProfileProcesses $CheckProfile).Count) { Write-Host 'closing the window of the last check'; Stop-ProfileBrowser $CheckProfile 0 }
+    $gone = $false
+    for ($try = 1; $try -le 5 -and -not $gone; $try++) {
+      try { Remove-Item -LiteralPath $CheckProfile -Recurse -Force; $gone = $true }
+      catch { if ($try -eq 5) { throw "the profile of the last check is still in use - close its window first ($($_.Exception.Message))" }; Start-Sleep -Seconds 1 }
+    }
   }
   New-Item -ItemType Directory -Force -Path $CheckProfile | Out-Null
   New-Item -ItemType Directory -Force -Path $Reports | Out-Null
@@ -448,12 +503,27 @@ function Invoke-Check([string[]]$Rest) {
     '--no-default-browser-check', '--disable-search-engine-choice-screen', '--enable-logging', '--v=0', 'about:blank')
   $argLine = ConvertTo-ArgString $list
   $proc = Start-Process -FilePath $cur.exe -ArgumentList $argLine -PassThru
+  $null = $proc.Handle   # kept, so that the exit code can still be read once it has ended
   $portFile = Join-Path $CheckProfile 'DevToolsActivePort'
   $clock = [Diagnostics.Stopwatch]::StartNew()
-  while (-not (Test-Path -LiteralPath $portFile) -and $clock.Elapsed.TotalSeconds -lt 60 -and -not $proc.HasExited) { Start-Sleep -Milliseconds 200 }
+  $looked = 0
+  while (-not (Test-Path -LiteralPath $portFile) -and $clock.Elapsed.TotalSeconds -lt 60) {
+    Start-Sleep -Milliseconds 200
+    # The process started here may end at once and hand over to a browser started as the signed-in user (see
+    # Get-ProfileProcesses), which opens the port on the same profile. Stop early only when nothing runs on it at all.
+    if ($proc.HasExited -and $clock.Elapsed.TotalSeconds -gt 10 -and $clock.Elapsed.TotalSeconds - $looked -ge 2) {
+      $looked = $clock.Elapsed.TotalSeconds
+      if (-not @(Get-ProfileProcesses $CheckProfile).Count) { break }
+    }
+  }
   if (-not (Test-Path -LiteralPath $portFile)) {
-    Write-Line 'FAIL' 'Chromium' "did not open its debugging port within 60 s (exited: $($proc.HasExited))"
+    if ($proc.HasExited -and -not @(Get-ProfileProcesses $CheckProfile).Count) {
+      Write-Line 'FAIL' 'Chromium' "ended at once (exit code $($proc.ExitCode)) and no browser took its place"
+    } else { Write-Line 'FAIL' 'Chromium' 'did not open its debugging port within 60 s' }
     try { $proc.Kill() } catch { }
+    Stop-ProfileBrowser $CheckProfile 0
+    $tail = @((Read-SharedText (Join-Path $CheckProfile 'chrome_debug.log')) -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 8)
+    foreach ($t in $tail) { $t = $t.Trim(); if ($t.Length -gt 300) { $t = $t.Substring(0, 300) }; Write-Line '--' 'browser log' $t }
     return 2
   }
   Start-Sleep -Milliseconds 300
@@ -476,11 +546,11 @@ function Invoke-Check([string[]]$Rest) {
   } finally {
     if (-not $KeepOpen) {
       try { Invoke-Cdp 'Browser.close' @{} '' 10 | Out-Null } catch { }
-      if (-not $proc.WaitForExit(15000)) { try { $proc.Kill() } catch { } }
+      if (-not $proc.HasExited -and -not $proc.WaitForExit(15000)) { try { $proc.Kill() } catch { } }
+      Stop-ProfileBrowser $CheckProfile 15   # the browser that took over from the first process, when one did
     }
   }
-  $log = ''
-  try { $log = [IO.File]::ReadAllText((Join-Path $CheckProfile 'chrome_debug.log')) } catch { }
+  $log = Read-SharedText (Join-Path $CheckProfile 'chrome_debug.log')
   if ($judged) { foreach ($l in @($judged.lines)) { Write-Line $l.verdict $l.key $l.text } }
   foreach ($l in ($log -split "`r?`n")) {
     if ($l -match "GPU process (has crashed|exited unexpectedly|isn't usable)|Exiting GPU process|GPU process launch failed") {

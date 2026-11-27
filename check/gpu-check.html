@@ -200,12 +200,18 @@
       say('--', 'processor, WebAssembly', (least > 0 ? Math.round(20000 / least) + ' million steps a second' : 'too fast for the clock') +
         ' (the gate\'s own number: set it beside Ctrl+Alt+B on another machine)');
     } catch (e) { say('--', 'processor, WebAssembly', 'error: ' + (e && e.message || e)); }
-    var reads = 0, c0 = performance.now(), c1 = c0;
-    while (c1 - c0 < 250) { c1 = performance.now(); reads++; }
+    // And its finest step: Chromium rounds performance.now() to 0.1 ms on purpose (5 microseconds on a cross-origin-
+    // isolated site such as the gate). A step of a millisecond or more is Chromium's fallback clock (base/time/
+    // time_win.cc: no steady processor clock seen, so timeGetTime), and an emulator timed by it is timed coarsely.
+    var reads = 0, c0 = performance.now(), c1 = c0, prev = c0, step = Infinity;
+    while (c1 - c0 < 250) { c1 = performance.now(); reads++; if (c1 > prev) { step = Math.min(step, c1 - prev); prev = c1; } }
     var ns = (c1 - c0) * 1e6 / reads, perSecond = 150000 * ns / 1e6;
     say(ns < 300 ? 'ok' : 'FAIL', 'clock, cost of a reading', Math.round(ns) + ' ns; at the Dreamcast core\'s ~150,000 readings a second that is ' +
       perSecond.toFixed(1) + ' ms of every second' + (ns < 300 ? '' : ' - SLOW: Windows is likely told to use the HPET timer. In an administrator ' +
       'command prompt, bcdedit /enum {current} - a line "useplatformclock Yes" means it; bcdedit /deletevalue useplatformclock and a restart undo it'));
+    say(step < 0.5 ? 'ok' : 'FAIL', 'clock, finest step', (step === Infinity ? 'it never moved' : step < 0.1 ? Math.round(step * 1000) + ' microseconds' :
+      step.toFixed(1) + ' ms') + (step < 0.5 ? '' : ' - COARSE: the browser found no steady processor clock and fell back to Windows\' ' +
+      'millisecond timer; a hypervisor that hides the processor\'s invariant clock does this'));
 
     // WebGPU (the gate does not need it; a working adapter is a good sign)
     if (!navigator.gpu) {

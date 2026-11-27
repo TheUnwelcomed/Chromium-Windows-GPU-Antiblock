@@ -192,10 +192,22 @@ def main():
     proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port_file = os.path.join(profile, "DevToolsActivePort")
     end = time.time() + a.timeout
-    while not os.path.exists(port_file) and time.time() < end and proc.poll() is None:
+    # On Windows, started as administrator, Chrome and Edge start themselves again as the signed-in user and the first
+    # process ends with exit code 0 (chrome_main_delegate.cc, MaybeAutoDeElevate): the one that took over opens the
+    # port on the same profile, so a first process that ends well is waited past.
+    handed_over = None
+    while not os.path.exists(port_file) and time.time() < end:
+        if proc.poll() is not None:
+            if os.name != "nt" or proc.returncode != 0:
+                break
+            if handed_over is None:
+                handed_over = time.time()
+            elif time.time() - handed_over > 20:
+                break
         time.sleep(0.2)
     if not os.path.exists(port_file):
-        print("FAIL Chromium did not open its debugging port (exit code %s): %s" % (proc.poll(), " ".join(args)))
+        print("FAIL Chromium did not open its debugging port (exit code %s%s): %s" % (
+            proc.poll(), ", handed over and nothing opened it" if handed_over else "", " ".join(args)))
         return 2
     time.sleep(0.3)
     with open(port_file) as f:
@@ -235,6 +247,8 @@ def main():
                 proc.wait(15)
             except subprocess.TimeoutExpired:
                 proc.kill()
+            if handed_over:
+                time.sleep(3)  # the browser that took over, not a child of this one, closes on its own
     log_text = ""
     log_path = os.path.join(profile, "chrome_debug.log")
     if os.path.exists(log_path):
