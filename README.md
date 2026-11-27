@@ -81,13 +81,18 @@ Never add `--disable-webgl`, `--disable-webgl2`, `--disable-3d-apis`, `--disable
 
 ## Codecs
 
+**The easy way, no building:** Chrome for Testing (`update.cmd`, `run.cmd`) plays H.264, AAC and HEVC. For a channel
+with Dolby (AC-3/E-AC-3) sound, Jellyfin converts just the sound to AAC for it, and the picture is still copied. To
+have Dolby play as it is, use **`run.cmd edge`**: the Edge already on the PC, with the same GPU switches. Building your
+own (`build\`) is only for having everything in one Chromium.
+
 From `build/config/features.gni` and `media/media_options.gni` at 160.0.8187.0, and from the check run on Chrome for
 Testing 153:
 
 | | Chrome for Testing (`update.cmd`) | your own build (`build\build-chromium.cmd`) | Microsoft Edge (`run.cmd edge`) | raw Chromium snapshot |
 |---|---|---|---|---|
 | H.264, AAC | yes | yes | yes | **no** |
-| HEVC / HEVC 10-bit | yes, decoded on the card (the 2060 SUPER has HEVC decode) | yes, on the card | `check.cmd edge` says | **no** |
+| HEVC / HEVC 10-bit | yes, decoded on the card (the 2060 SUPER has HEVC decode) | yes, on the card | with the HEVC Video Extensions from the Microsoft Store (Microsoft's own Edge guide) | **no** |
 | AC-3 / E-AC-3 (Dolby) | no: compiled out of Chrome on Windows | **yes**, through Windows 10's own Dolby decoder | yes, the same decoder | no |
 | DTS | no: compiled out | no (see build/README.md) | `check.cmd edge` says | no |
 | VP9, AV1, Opus, FLAC, MP3 | yes (AV1 on the processor: the 2060 has no AV1 decoder) | yes | `check.cmd edge` says | yes |

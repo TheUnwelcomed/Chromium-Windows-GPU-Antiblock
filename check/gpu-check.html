@@ -169,7 +169,8 @@
     var NO = {
       h264: 'NOT in this build - IPTV channels will not play (a raw Chromium snapshot has no H.264; use Chrome for Testing)',
       aac: 'NOT in this build - channel sound will not play (a raw Chromium snapshot has no AAC; use Chrome for Testing)',
-      hevc: 'NOT here - Chrome decodes HEVC only on the card: it needs the proprietary codecs and hardware video decoding on',
+      hevc: /Edg\//.test(navigator.userAgent) ? 'NOT here - Edge needs the HEVC Video Extensions from the Microsoft Store for it' :
+        'NOT here - Chrome decodes HEVC only on the card: it needs the proprietary codecs and hardware video decoding on',
       dolby: 'no - Google leaves Dolby out of Chrome on Windows; Edge plays it (run.cmd edge); Jellyfin makes AAC of it for this browser',
       dts: 'no - in no Chromium browser on Windows; Jellyfin converts it',
       dv: 'no - profile 8 still plays as its HEVC layer; Jellyfin tone-maps profile 5'
