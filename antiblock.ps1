@@ -221,10 +221,45 @@ function Show-Windows {
     if (Test-Elevated) { $where += ', run as administrator (not needed: the browser starts itself again as you, and the check waits for that one)' }
     Write-Line '--' 'session' $where
   }
+  $ryzen = $false
   try {
     foreach ($cpu in @(Get-CimInstance Win32_Processor -ErrorAction Stop)) {
-      Write-Line '--' 'processor' ('{0}, {1} cores / {2} threads, {3:0.0} GHz base' -f ([string]$cpu.Name).Trim(), $cpu.NumberOfCores,
+      if ([string]$cpu.Name -match 'Ryzen') { $ryzen = $true }
+      Write-Line '--' 'processor' ('{0}, {1} cores / {2} threads, {3:0.0} GHz as Windows gives it' -f ([string]$cpu.Name).Trim(), $cpu.NumberOfCores,
         $cpu.NumberOfLogicalProcessors, ($cpu.MaxClockSpeed / 1000.0))
+    }
+  } catch { }
+  # Windows' clock, which every performance.now() of the browser reads (QueryPerformanceCounter). 10 MHz is the
+  # processor's own counter, read in nanoseconds without leaving the program. The HPET (14.318 MHz; 24 MHz on Intel
+  # boards) and the ACPI timer (3.58 MHz) are read through the kernel, about a microsecond each - and the Dreamcast core
+  # reads the clock about 150,000 times a second. bcdedit's useplatformclock puts the HPET there (some tuning tools do).
+  $qpf = [Diagnostics.Stopwatch]::Frequency
+  $fix = 'in an administrator command prompt: bcdedit /deletevalue useplatformclock, then restart'
+  if ([math]::Abs($qpf - 14318180) -le 5000 -or $qpf -eq 24000000) {
+    Write-Line 'FAIL' 'Windows clock' ('the HPET ({0:N0} Hz): every reading of the clock goes through Windows, about a microsecond each - {1}' -f $qpf, $fix)
+  } elseif ([math]::Abs($qpf - 3579545) -le 100) {
+    Write-Line 'FAIL' 'Windows clock' ('the ACPI timer ({0:N0} Hz): every reading of the clock goes through Windows - {1}' -f $qpf, $fix)
+  } else { Write-Line 'ok' 'Windows clock' ("the processor's own counter ({0:N0} Hz)" -f $qpf) }
+  # The memory: an emulator's one core waits on it often, a Ryzen more than most (its inner links run at the memory's
+  # speed). Sticks run at a slow fallback speed until XMP / DOCP / EXPO is turned on in the BIOS.
+  try {
+    $mods = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction Stop)
+    if ($mods.Count) {
+      $gb = [math]::Round([double](($mods | Measure-Object -Property Capacity -Sum).Sum) / 1GB)
+      $mts = @($mods | ForEach-Object { [int]$(if ($_.ConfiguredClockSpeed) { $_.ConfiguredClockSpeed } else { $_.Speed }) } | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+      $top = 0
+      foreach ($m in $mts) { if ($m -gt $top) { $top = $m } }
+      $slots = @($mods | ForEach-Object { ([string]$_.DeviceLocator).Trim() } | Where-Object { $_ })
+      $parts = @($mods | ForEach-Object { ([string]$_.PartNumber).Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+      $text = '{0} GB in {1} stick(s){2}, running at {3} MT/s{4}' -f $gb, $mods.Count, $(if ($slots.Count) { ' (' + ($slots -join ', ') + ')' } else { '' }),
+        $(if ($mts.Count) { $mts -join '/' } else { '?' }), $(if ($parts.Count) { ' - ' + ($parts -join ', ') } else { '' })
+      $v = '--'
+      if ($mods.Count -eq 1) { $text += ' - one stick: one memory channel of two' }
+      if ($top -gt 0 -and $top -le 2666) {
+        if ($ryzen) { $v = 'FAIL' }
+        $text += ' - SLOW: a fallback speed. Sticks sold as faster (their name says) run so once XMP / DOCP / EXPO is on in the BIOS'
+      }
+      Write-Line $v 'memory' $text
     }
   } catch { }
   try {

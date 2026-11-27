@@ -30,7 +30,7 @@ The Admin-Gate's emulator cores and the new Windows engine need WebGL 2 on the c
 | `check.cmd [keep] [--switch]` | the check; `keep` leaves the window open, a `--switch` is tried once without touching `flags.txt` |
 | `run.cmd edge`, `check.cmd edge` | the same with the Microsoft Edge already on the machine (own profile `profile-edge\`): the one Chromium browser on Windows that plays Dolby AC-3/E-AC-3 |
 | `reset-gpu-cache.cmd [edge]` | empty the shader and GPU caches of the profile (bookmarks and logins stay) |
-| `status.cmd` | the build in use, the switches, what Windows says about the session and each display adapter |
+| `status.cmd` | the build in use, the switches, what Windows says about the session, the processor, its clock, the memory and each display adapter |
 | `update-and-run.cmd` | both |
 | `build\build-chromium.cmd` | **build your own Chromium with every codec Windows can decode**, AC-3/E-AC-3 included, on this PC: [build/README.md](build/README.md) |
 
@@ -133,6 +133,8 @@ browser, so Jellyfin transcodes it. Dolby Vision stays as Chromium ships it: une
 | `shader work ... the processor drawing` | WebGL works, but on the processor |
 | `the window of the last check (check keep) is still open ... BrowserMetrics-....pma' is denied` | from a copy before 2026-11-26: the browser of an earlier check still runs on its folder (see the next line). The current `check.cmd` closes it itself |
 | `Chromium  did not open its debugging port ... (exited: True)` | from a copy before 2026-11-26 run as administrator: since 2025 Chrome and Edge, started as administrator, start themselves again as the signed-in user and the first process ends at once (`chrome_main_delegate.cc`, `MaybeAutoDeElevate`). The current `check.cmd` waits for the browser that took over. Administrator is not needed for any of these files |
+| `Windows clock  the HPET (14,318,180 Hz)` | Windows reads its clock from the HPET (or the ACPI timer) instead of the processor's own counter, about a microsecond a reading, through the kernel. Undo: `bcdedit /deletevalue useplatformclock` in an administrator command prompt, then restart |
+| `memory ... SLOW: a fallback speed` | the memory runs at the speed every stick falls back to. If the sticks are sold as faster (their name, printed beside it, says), turning on XMP / DOCP / EXPO in the BIOS runs them at it. A Ryzen's inner links run at the memory's speed, so an emulator on one feels it |
 | `clock, cost of a reading` | the browser's clock is slow to read; the Dreamcast core reads it about 150,000 times a second. Usually Windows told to use the HPET timer: `bcdedit /enum {current}` in an administrator command prompt; a line `useplatformclock Yes` is it, and `bcdedit /deletevalue useplatformclock` and a restart undo it |
 | `clock, finest step` | the browser found no steady processor clock and times everything by Windows' millisecond timer |
 
