@@ -1,0 +1,32 @@
+# The switches run.sh and check.sh start Chromium with: one a line, taken whole. A line starting with # is a note.
+# run.sh adds --ozone-platform=x11 by itself on a Wayland session with NVIDIA's driver (OZONE=wayland ./run.sh to stop it).
+
+# Skip Chromium's list of graphics cards and drivers it refuses (gpu/config/software_rendering_list.json). On Linux it
+# refuses nouveau (entry 30), software GL such as llvmpipe (entry 3) and NVIDIA drivers older than 295 (entry 47).
+--ignore-gpu-blocklist
+
+# After 3 GPU process crashes in a few minutes Chromium quietly draws on the processor for the rest of the session;
+# with this it stays on the card and a crash shows as a crash.
+--disable-gpu-process-crash-limit
+
+# Draw page content on the card.
+--enable-gpu-rasterization
+
+# ---- Off unless the # is taken away -----------------------------------------------------------------------------
+
+# Hardware video decoding on an NVIDIA card goes through VA-API and needs nvidia-vaapi-driver installed. Chromium
+# keeps it off on NVIDIA on purpose ("NVIDIA VA-API drivers do not support Chromium and can sometimes cause
+# crashes", media/base/media_switches.cc, crbug.com/1492880). To try it anyway:
+# --enable-features=VaapiOnNvidiaGPUs,VaapiIgnoreDriverChecks
+
+# For frame-rate tests: keep drawing at full speed while the window is covered or in the background.
+# --disable-backgrounding-occluded-windows
+# --disable-renderer-backgrounding
+# --disable-background-timer-throttling
+
+# No frame cap.
+# --disable-frame-rate-limit
+# --disable-gpu-vsync
+
+# Never put these here - each turns the card or WebGL off, and check.sh fails on them:
+#   --disable-webgl  --disable-webgl2  --disable-3d-apis  --disable-gpu  --disable-gpu-compositing  --use-angle=swiftshader

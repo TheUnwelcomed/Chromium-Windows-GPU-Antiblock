@@ -1,0 +1,42 @@
+# The switches run.cmd and check.cmd start Chromium with: one a line, taken whole. A line starting with # is a
+# note: put a # in front of a switch to turn it off, take it away to turn one on. Every switch here was read in
+# Chromium's own source at 160.0.8187.0 (README.md says where).
+
+# Skip Chromium's list of graphics cards and drivers it refuses (gpu/config/software_rendering_list.json).
+# With a working NVIDIA driver nothing on that list matches a 2060 SUPER; this is for the cases where Chromium
+# misreads the machine (another adapter in front, an odd driver string).
+--ignore-gpu-blocklist
+
+# With more than one graphics adapter (a processor's own graphics enabled beside the card, a capture card's
+# display adapter, a virtual one), draw everything on the high-performance one: the card.
+--force-high-performance-gpu
+
+# After 3 GPU process crashes within a few minutes Chromium quietly switches to drawing on the processor for the
+# rest of the session, and WebGL goes with it - which looks like "blocklisted". With this it stays on the card, and
+# a crash shows as a crash. Put a # in front if pages keep going black, and run check.cmd: it counts the crashes.
+--disable-gpu-process-crash-limit
+
+# Draw page content on the card (Chromium already does on an NVIDIA card with Direct3D 11; said here for certain).
+--enable-gpu-rasterization
+
+# ---- Off unless the # is taken away -----------------------------------------------------------------------------
+
+# Pin the card by its adapter id, when check.cmd says another adapter draws (it prints this line with your numbers):
+# --use-adapter-luid=0,12345
+
+# For frame-rate tests: keep drawing at full speed while the window is covered or in the background.
+# --disable-backgrounding-occluded-windows
+# --disable-renderer-backgrounding
+# --disable-background-timer-throttling
+
+# No frame cap: draw as fast as the card can, not at the screen's refresh rate.
+# --disable-frame-rate-limit
+# --disable-gpu-vsync
+
+# If the GPU process still crashes: switch off Chromium's newer drawing backend (Skia Graphite), keep Direct3D 11.
+# --disable-skia-graphite
+# --use-angle=d3d11
+
+# Never put these here - each turns the card or WebGL off, and check.cmd fails on them:
+#   --disable-webgl  --disable-webgl2  --disable-3d-apis  --disable-gpu  --disable-gpu-compositing
+#   --use-angle=swiftshader  --use-angle=warp  --use-gl=swiftshader

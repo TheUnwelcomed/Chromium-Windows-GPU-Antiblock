@@ -1,0 +1,4 @@
+# cmd.exe wants CRLF: the .cmd files are stored with CRLF and never converted
+*.cmd -text
+*.sh text eol=lf
+*.py text eol=lf

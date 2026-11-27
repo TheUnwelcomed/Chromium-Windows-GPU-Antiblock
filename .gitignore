@@ -1,0 +1,12 @@
+# downloaded builds, browser profiles, check reports - made on each machine, never committed
+builds/
+profile/
+profile-edge/
+profile-check/
+reports/
+linux/builds/
+linux/profile/
+linux/profile-check/
+linux/reports/
+*.zip.part
+__pycache__/

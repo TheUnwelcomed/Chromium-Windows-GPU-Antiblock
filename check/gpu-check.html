@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GPU check</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 24px; background: #111; color: #ddd; font: 14px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #fff; }
+  p.sub { margin: 0 0 18px; color: #999; }
+  table { border-collapse: collapse; width: 100%; max-width: 1100px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #262626; vertical-align: top; }
+  td.v { width: 44px; font-weight: 700; font-family: ui-monospace, monospace; }
+  td.k { width: 230px; color: #aaa; }
+  td.t { font-family: ui-monospace, monospace; word-break: break-word; }
+  .ok { color: #5fd35f; } .FAIL { color: #ff5a5a; } .note { color: #888; }
+  #state { margin-top: 16px; color: #888; }
+</style>
+</head>
+<body>
+<h1>GPU check</h1>
+<p class="sub">What this browser does with the graphics card, asked from an ordinary page. Nothing leaves this page.</p>
+<table id="out"></table>
+<div id="state">running...</div>
+<script>
+'use strict';
+// Each line: verdict ("ok", "FAIL" or "--"), what was asked, what came back.
+// run.cmd / check.cmd read window.gpuCheck (a promise of all the lines) through the browser's debugging port;
+// opened by hand, the same lines are shown in the table.
+(function () {
+  var lines = [];
+  var out = document.getElementById('out');
+  var SOFTWARE = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic|\bwarp\b|subzero/i;
+
+  function say(verdict, key, text) {
+    lines.push({ verdict: verdict, key: key, text: String(text) });
+    var tr = document.createElement('tr');
+    [['v ' + (verdict === '--' ? 'note' : verdict), verdict], ['k', key], ['t', String(text)]].forEach(function (c) {
+      var td = document.createElement('td'); td.className = c[0]; td.textContent = c[1]; tr.appendChild(td);
+    });
+    out.appendChild(tr);
+  }
+  function guard(key, fn) {
+    try { return fn(); } catch (e) { say('FAIL', key, 'error: ' + (e && e.message || e)); return null; }
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  function rendererOf(gl) {
+    var ext = gl.getExtension('WEBGL_debug_renderer_info');
+    var r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    var v = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+    return { renderer: String(r), vendor: String(v) };
+  }
+
+  // A fragment shader that does a fixed amount of arithmetic per pixel, timed to the end with readPixels.
+  // A graphics card does this in milliseconds; a processor drawing in software takes hundreds or thousands.
+  function shaderWork(gl, size, steps, draws) {
+    var vs = '#version 300 es\nin vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+    var fs = '#version 300 es\nprecision highp float; uniform float seed; out vec4 o;\n' +
+      'void main(){ vec2 q = gl_FragCoord.xy * 0.001 + seed; float a = 0.0;\n' +
+      ' for (int i = 0; i < ' + steps + '; i++) { q = vec2(q.x * q.x - q.y * q.y, 2.0 * q.x * q.y) * 0.5 + 0.25; a += q.x; }\n' +
+      ' o = vec4(fract(a), q, 1.0); }';
+    function sh(type, src) {
+      var s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      return s;
+    }
+    var prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    var fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.viewport(0, 0, size, size);
+    var px = new Uint8Array(4), seedLoc = gl.getUniformLocation(prog, 'seed');
+    gl.uniform1f(seedLoc, 0.0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // warm up
+    var t0 = performance.now();
+    for (var i = 0; i < draws; i++) { gl.uniform1f(seedLoc, i * 0.01); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+    gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    var ms = performance.now() - t0;
+    gl.deleteFramebuffer(fb); gl.deleteTexture(tex); gl.deleteBuffer(buf); gl.deleteProgram(prog);
+    return { ms: ms, rate: size * size * steps * draws / (ms / 1000) / 1e9 }; // billions of shader steps a second
+  }
+
+  async function run() {
+    var ua = navigator.userAgent;
+    var version = (ua.match(/(?:Chrome|HeadlessChrome)\/([\d.]+)/) || [])[1] || '?';
+    try {
+      var hi = navigator.userAgentData && await navigator.userAgentData.getHighEntropyValues(['fullVersionList', 'platformVersion', 'architecture', 'bitness']);
+      if (hi && hi.fullVersionList) {
+        var b = hi.fullVersionList.filter(function (x) { return /Chrom/.test(x.brand); }).map(function (x) { return x.brand + ' ' + x.version; });
+        if (b.length) version = b.join(', ');
+      }
+      say('--', 'browser', version + (hi && hi.platformVersion ? ' on ' + navigator.userAgentData.platform + ' ' + hi.platformVersion + ' (' + hi.architecture + ' ' + hi.bitness + '-bit)' : ''));
+    } catch (e) { say('--', 'browser', version); }
+
+    // WebGL 2, asked for the fast card
+    var c2 = document.createElement('canvas');
+    var gl2 = guard('WebGL 2', function () { return c2.getContext('webgl2', { powerPreference: 'high-performance' }); });
+    var hardware = false;
+    if (!gl2) {
+      say('FAIL', 'WebGL 2', 'none in this browser (switched off by --disable-webgl, blocklisted, or the GPU process fell back to software and WebGL went with it)');
+    } else {
+      var r2 = rendererOf(gl2), soft = SOFTWARE.test(r2.renderer);
+      hardware = !soft;
+      say(soft ? 'FAIL' : 'ok', 'WebGL 2', r2.renderer + (soft ? '  <- drawn by the processor, not a graphics card' : ''));
+      say(/nvidia/i.test(r2.renderer) ? 'ok' : '--', 'NVIDIA card drawing WebGL', /nvidia/i.test(r2.renderer) ? 'yes' : 'no (' + r2.vendor + ')');
+      var maxTex = gl2.getParameter(gl2.MAX_TEXTURE_SIZE), maxRb = gl2.getParameter(gl2.MAX_RENDERBUFFER_SIZE);
+      say('--', 'WebGL 2 limits', 'texture ' + maxTex + ', renderbuffer ' + maxRb + ', samples ' + gl2.getParameter(gl2.MAX_SAMPLES));
+    }
+    // The browser's own word: a context that must not be slow
+    var strict = guard('WebGL 2, no slow path', function () {
+      return document.createElement('canvas').getContext('webgl2', { failIfMajorPerformanceCaveat: true, powerPreference: 'high-performance' });
+    });
+    say(strict ? (hardware ? 'ok' : '--') : 'FAIL', 'WebGL 2, no slow path', strict ? 'the browser gives a context it does not call slow' :
+      'refused: the browser itself says WebGL here would be a software path');
+    var gl1 = guard('WebGL 1', function () { return document.createElement('canvas').getContext('webgl'); });
+    say(gl1 ? '--' : 'FAIL', 'WebGL 1', gl1 ? rendererOf(gl1).renderer : 'none');
+
+    // The work test: four times more work each round, until one round takes over 100 ms (then its rate is a fair
+    // measure) or the largest is done. A processor drawing stops after a few small rounds; a card does them all.
+    if (gl2) {
+      var work = guard('shader work', function () {
+        var rounds = [[256, 64, 1], [512, 64, 1], [1024, 64, 1], [1024, 64, 4], [1024, 256, 4], [1024, 256, 16], [2048, 256, 16]], w = null;
+        for (var r = 0; r < rounds.length; r++) {
+          w = shaderWork(gl2, rounds[r][0], rounds[r][1], rounds[r][2]);
+          if (w.ms > 100) break;
+        }
+        return w;
+      });
+      if (work) {
+        var fast = work.rate > 30;
+        say(fast ? 'ok' : 'FAIL', 'shader work', work.rate.toFixed(work.rate < 10 ? 2 : 0) + ' billion steps a second (last round ' +
+          work.ms.toFixed(1) + ' ms)' + (fast ? ' - a graphics card' : ' - the processor drawing, or a very slow card'));
+      }
+    }
+
+    // WebGPU (the gate does not need it; a working adapter is a good sign)
+    if (!navigator.gpu) {
+      say('--', 'WebGPU', 'not in this browser');
+    } else {
+      try {
+        var ad = await Promise.race([navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }), sleep(8000).then(function () { return 'timeout'; })]);
+        if (ad === 'timeout') say('--', 'WebGPU', 'no answer in 8 s');
+        else if (!ad) say('--', 'WebGPU', 'no adapter (blocklisted or unsupported)');
+        else {
+          var inf = ad.info || {};
+          var fb = inf.isFallbackAdapter || ad.isFallbackAdapter;
+          say(fb ? 'FAIL' : 'ok', 'WebGPU', [inf.vendor, inf.architecture, inf.device, inf.description].filter(Boolean).join(' / ') +
+            (fb ? '  <- fallback (software) adapter' : ''));
+        }
+      } catch (e) { say('--', 'WebGPU', 'error: ' + (e && e.message || e)); }
+    }
+
+    // Codecs, asked the way hls.js and Jellyfin's web player ask (Media Source Extensions). A line marked "must"
+    // FAILs when missing: H.264 and AAC carry the IPTV channels, HEVC the library. What Chromium builds for Windows
+    // is in media/media_options.gni: H.264/AAC/HEVC only with the proprietary codecs (Chrome, Chrome for Testing,
+    // Edge - not a raw snapshot); HEVC is decoded by the card only; AC-3/E-AC-3 and DTS are left out of Chrome on
+    // Windows altogether - Edge plays Dolby through Windows' own decoder.
+    var MS = window.MediaSource || window.ManagedMediaSource;
+    function mse(type) { try { return !!(MS && MS.isTypeSupported(type)); } catch (e) { return false; } }
+    var NO = {
+      h264: 'NOT in this build - IPTV channels will not play (a raw Chromium snapshot has no H.264; use Chrome for Testing)',
+      aac: 'NOT in this build - channel sound will not play (a raw Chromium snapshot has no AAC; use Chrome for Testing)',
+      hevc: 'NOT here - Chrome decodes HEVC only on the card: it needs the proprietary codecs and hardware video decoding on',
+      dolby: 'no - Google leaves Dolby out of Chrome on Windows; Edge plays it (run.cmd edge); Jellyfin makes AAC of it for this browser',
+      dts: 'no - in no Chromium browser on Windows; Jellyfin converts it',
+      dv: 'no - profile 8 still plays as its HEVC layer; Jellyfin tone-maps profile 5'
+    };
+    [['H.264 High (MSE)', 'video/mp4; codecs="avc1.640028"', 'must', NO.h264],
+     ['H.264 Main (MSE)', 'video/mp4; codecs="avc1.4D401F"', 'must', NO.h264],
+     ['AAC-LC (MSE)', 'audio/mp4; codecs="mp4a.40.2"', 'must', NO.aac],
+     ['HE-AAC (MSE)', 'audio/mp4; codecs="mp4a.40.5"', '', 'no'],
+     ['HEVC Main (MSE)', 'video/mp4; codecs="hvc1.1.6.L120.90"', 'must', NO.hevc],
+     ['HEVC Main 10 (MSE)', 'video/mp4; codecs="hvc1.2.4.L153.B0"', 'must', NO.hevc],
+     ['MP3 (MSE)', 'audio/mpeg', '', 'no'],
+     ['AC-3 Dolby Digital (MSE)', 'audio/mp4; codecs="ac-3"', '', NO.dolby],
+     ['E-AC-3 Dolby Digital+ (MSE)', 'audio/mp4; codecs="ec-3"', '', NO.dolby],
+     ['DTS (MSE)', 'audio/mp4; codecs="dtsc"', '', NO.dts],
+     ['Opus (MSE)', 'audio/mp4; codecs="opus"', '', 'no'],
+     ['FLAC (MSE)', 'audio/mp4; codecs="flac"', '', 'no'],
+     ['VP9 (MSE)', 'video/webm; codecs="vp09.00.40.08"', '', 'no'],
+     ['VP9 10-bit (MSE)', 'video/webm; codecs="vp09.02.40.10"', '', 'no'],
+     ['AV1 (MSE)', 'video/mp4; codecs="av01.0.08M.08"', '', 'no'],
+     ['AV1 10-bit (MSE)', 'video/mp4; codecs="av01.0.12M.10"', '', 'no'],
+     ['Dolby Vision (MSE)', 'video/mp4; codecs="dvh1.05.06"', '', NO.dv],
+     ['MPEG-TS H.264+AAC (MSE)', 'video/mp2t; codecs="avc1.640028,mp4a.40.2"', '', 'no (hls.js turns TS into MP4 itself)']].forEach(function (c) {
+      var yes = mse(c[1]);
+      say(c[2] ? (yes ? 'ok' : 'FAIL') : '--', c[0], yes ? 'plays' : c[3]);
+    });
+    var v = document.createElement('video');
+    say('--', 'HLS without a script', v.canPlayType('application/vnd.apple.mpegurl') || 'no (hls.js does it)');
+
+    // Hardware decoding: the browser says "power efficient" when the card decodes
+    if (navigator.mediaCapabilities) {
+      var tries = [['H.264 1080p60', 'video/mp4; codecs="avc1.640028"', 0], ['HEVC 2160p60', 'video/mp4; codecs="hvc1.1.6.L153.90"', 1],
+                   ['HEVC 10-bit 2160p60', 'video/mp4; codecs="hvc1.2.4.L153.B0"', 1], ['VP9 2160p60', 'video/webm; codecs="vp09.00.51.08"', 1],
+                   ['AV1 2160p60', 'video/mp4; codecs="av01.0.13M.08"', 1]];
+      for (var i = 0; i < tries.length; i++) {
+        var big = tries[i][2];
+        try {
+          var d = await navigator.mediaCapabilities.decodingInfo({ type: 'media-source', video: {
+            contentType: tries[i][1], width: big ? 3840 : 1920, height: big ? 2160 : 1080, bitrate: big ? 20e6 : 8e6, framerate: 60 } });
+          var text = !d.supported ? 'not supported' : (d.powerEfficient ? 'by the graphics card' : 'by the processor') + (d.smooth ? '' : ', not smooth');
+          var mustCard = /^(H\.264|HEVC)/.test(tries[i][0]);
+          say(mustCard && d.supported && d.powerEfficient ? 'ok' : '--', 'decode ' + tries[i][0], text);
+        } catch (e) { say('--', 'decode ' + tries[i][0], 'error: ' + (e && e.message || e)); }
+      }
+    }
+
+    // How often the browser gives the page a turn (the screen's refresh, unless something throttles the window)
+    var turns = await new Promise(function (resolve) {
+      var n = 0, from = 0;
+      function f(now) { if (!from) from = now; n++; if (now - from >= 1000) resolve(Math.round((n - 1) * 1000 / (now - from))); else requestAnimationFrame(f); }
+      requestAnimationFrame(f);
+      setTimeout(function () { resolve(0); }, 4000);
+    });
+    say('--', 'turns a second', turns ? turns + ' (the refresh rate; much lower means the window is hidden or throttled)' : 'none in 4 s (window hidden?)');
+    say('--', 'screen', screen.width + ' x ' + screen.height + ' at ' + devicePixelRatio + 'x, ' + screen.colorDepth + '-bit');
+
+    var bad = lines.filter(function (l) { return l.verdict === 'FAIL'; }).length;
+    document.getElementById('state').textContent = bad ? bad + ' line(s) FAIL' : 'every checked line ok';
+    document.title = (bad ? 'FAIL' : 'ok') + ' - GPU check';
+    return { lines: lines, hardware: hardware, failed: bad };
+  }
+  window.gpuCheck = run().catch(function (e) {
+    say('FAIL', 'the check itself', String(e && e.stack || e));
+    return { lines: lines, hardware: false, failed: -1 };
+  });
+})();
+</script>
+</body>
+</html>
